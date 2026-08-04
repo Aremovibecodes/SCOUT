@@ -37,6 +37,31 @@ function parseDaysLeft(timeLeftStr) {
   return null;
 }
 
+function chunkAlertMessage(results, maxLength) {
+  const chunks = [];
+  const header = "🚨 Scout found " + results.length + " new opportunit" + (results.length === 1 ? "y" : "ies") + "\n\n";
+  let current = header;
+
+  results.forEach(function(r) {
+    let entry = "📁 " + r.category + "\n";
+    entry += r.title + "\n";
+    entry += "Sponsor: " + r.sponsor + "\n";
+    entry += "Prize: " + r.prize + "\n";
+    entry += "Deadline: " + r.deadline + "\n";
+    entry += "Link: " + r.link + "\n\n";
+
+    if ((current + entry).length > maxLength) {
+      chunks.push(current);
+      current = entry;
+    } else {
+      current += entry;
+    }
+  });
+
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
 const client = new CommClient();
 
 async function checkHackathons(seenIds) {
@@ -54,11 +79,7 @@ async function checkHackathons(seenIds) {
       return meetsBudget && withinWindow && notSeenYet;
     });
 
-    console.log('Hackathon matches found:', matches.length);
-    matches.forEach(function(h) {
-      console.log('-', h.title, '|', h.prize_amount.replace(/<[^>]+>/g, ''), '|', h.time_left_to_submission);
-      seenIds.push('hackathon-' + h.id);
-    });
+    matches.forEach(function(h) { seenIds.push('hackathon-' + h.id); });
 
     return matches.map(function(h) {
       return {
@@ -92,11 +113,7 @@ async function checkBugBounty(seenIds) {
       return isRecent && meetsBudget && isOpenToAll && notSeenYet;
     });
 
-    console.log('Bug bounty matches found:', matches.length);
-    matches.forEach(function(p) {
-      console.log('-', p.project, '| max bounty:', p.maxBounty, '| updated:', p.updatedDate);
-      seenIds.push('bugbounty-' + p.slug);
-    });
+    matches.forEach(function(p) { seenIds.push('bugbounty-' + p.slug); });
 
     return matches.map(function(p) {
       return {
@@ -129,11 +146,7 @@ async function checkContentBounty(seenIds) {
       return meetsBudget && withinWindow && notSeenYet;
     });
 
-    console.log('Content bounty matches found:', matches.length);
-    matches.forEach(function(m) {
-      console.log('-', m.title, '|', m.rewardAmount, m.token, '| deadline:', m.deadline);
-      seenIds.push(m.id);
-    });
+    matches.forEach(function(m) { seenIds.push(m.id); });
 
     return matches.map(function(listing) {
       return {
@@ -150,52 +163,50 @@ async function checkContentBounty(seenIds) {
     return [];
   }
 }
-function formatAlert(result) {
-  return '🚨 New ' + result.category + '\n\n' +
-    result.title + '\n' +
-    'Prize: ' + result.prize + '\n' +
-    'Deadline: ' + result.deadline + '\n' +
-    'Sponsor: ' + result.sponsor + '\n' +
-    result.link;
-}
 
-async function sendAlerts(results) {
-  for (const result of results) {
-    const message = formatAlert(result);
-    try {
-      await client.sendMessage(process.env.TELEGRAM_CONVERSATION_ID, message, null, null);
-      console.log('Sent to Telegram:', result.title);
-    } catch (err) {
-      console.error('Telegram send failed:', err.message || err);
-    }
-    try {
-      await client.sendMessage(process.env.DISCORD_CONVERSATION_ID, message, null, null);
-      console.log('Sent to Discord:', result.title);
-    } catch (err) {
-      console.error('Discord send failed:', err.message || err);
-    }
-  }
-}   
 async function main() {
   const seenIds = loadSeen();
   let allResults = [];
 
   if (WANTED_CATEGORIES.includes('hackathons')) {
-    const results = await checkHackathons(seenIds);
-    allResults = allResults.concat(results);
+    allResults = allResults.concat(await checkHackathons(seenIds));
   }
   if (WANTED_CATEGORIES.includes('bugBounty')) {
-    const results = await checkBugBounty(seenIds);
-    allResults = allResults.concat(results);
+    allResults = allResults.concat(await checkBugBounty(seenIds));
   }
   if (WANTED_CATEGORIES.includes('contentBounty')) {
-    const results = await checkContentBounty(seenIds);
-    allResults = allResults.concat(results);
+    allResults = allResults.concat(await checkContentBounty(seenIds));
   }
 
   console.log('TOTAL new matches this run:', allResults.length);
+
+  if (allResults.length > 0) {
+    console.log('Using Telegram conv ID:', process.env.TELEGRAM_CONVERSATION_ID);
+    console.log('Using Discord conv ID:', process.env.DISCORD_CONVERSATION_ID);
+
+    const chunks = chunkAlertMessage(allResults, 1500);
+    console.log('Sending', chunks.length, 'chunk(s) per channel...');
+
+    for (let i = 0; i < chunks.length; i++) {
+      try {
+        await client.sendMessage(process.env.TELEGRAM_CONVERSATION_ID, chunks[i], null, null);
+        console.log('Telegram chunk', i + 1, 'sent OK');
+      } catch (err) {
+        console.error('Telegram chunk', i + 1, 'FAILED:', err.message || err);
+      }
+
+      try {
+        await client.sendMessage(process.env.DISCORD_CONVERSATION_ID, chunks[i], null, null);
+        console.log('Discord chunk', i + 1, 'sent OK');
+      } catch (err) {
+        console.error('Discord chunk', i + 1, 'FAILED:', err.message || err);
+      }
+    }
+  } else {
+    console.log('No new matches - no alert sent.');
+  }
+
   saveSeen(seenIds);
-  await sendAlerts(allResults);
 }
 
 main();
