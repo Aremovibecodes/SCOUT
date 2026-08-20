@@ -117,5 +117,8 @@
   "bugbounty-kiln-webapp",
   "bugbounty-audit-competition-ens",
   "bugbounty-orca",
-  "bugbounty-openzeppelin"
+  "bugbounty-openzeppelin",
+  "bugbounty-rootstocklabs",
+  "bugbounty-capyfi",
+  "bugbounty-charm"
 ]
